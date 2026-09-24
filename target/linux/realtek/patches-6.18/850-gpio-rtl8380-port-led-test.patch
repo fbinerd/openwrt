@@ -1,0 +1,183 @@
+From: OpenWrt SG1002 MR bring-up <noreply@example.invalid>
+Subject: [PATCH] gpio: add RTL8380 port LED software-control GPIO provider
+
+The RTL8380 port LED scan engine is not connected to the SoC GPIO block.
+Expose its two software-controllable LED channels as a GPIO provider so board
+bring-up can validate LED wiring without vendor firmware.  The driver is
+intentionally generic; the board DTS elects to claim the port LED engine.
+
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -567,6 +567,15 @@
+ 	  When built as a module, the module will be called realtek_otto_gpio.
++config GPIO_RTL8380_PORT_LED
++	bool "Realtek RTL8380 port LED software control"
++	depends on GPIO_REALTEK_OTTO
++	depends on OF
++	help
++	  Expose the RTL8380 LED scan engine's two port LED channels as a
++	  56-line GPIO provider.  This is used by boards whose front-panel
++	  port LEDs are driven directly by the switch ASIC.
++
+ config GPIO_REG
+ 	bool
+ config GPIO_REALTEK_OTTO
+ 	tristate "Realtek Otto GPIO support"
+ 	depends on MACH_REALTEK_RTL
+--- a/drivers/gpio/Makefile
++++ b/drivers/gpio/Makefile
+@@ -155,4 +155,5 @@
+ obj-$(CONFIG_GPIO_REALTEK_OTTO)		+= gpio-realtek-otto.o
++obj-$(CONFIG_GPIO_RTL8380_PORT_LED)	+= gpio-rtl8380-portled.o
+ obj-$(CONFIG_GPIO_REG)			+= gpio-reg.o
+ obj-$(CONFIG_GPIO_RK8XX)			+= gpio-rk8xx.o
+ obj-$(CONFIG_GPIO_ROCKCHIP)		+= gpio-rockchip.o
+--- /dev/null
++++ b/drivers/gpio/gpio-rtl8380-portled.c
+@@ -0,0 +1,146 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* RTL8380 port LED scan engine GPIO provider. */
++#include <linux/bitops.h>
++#include <linux/gpio/driver.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++
++#include <asm/mach-rtl-otto/mach-rtl-otto.h>
++
++#define RTL838X_LED_GLB_CTRL		0xa000
++#define RTL838X_LED_MODE_SEL		0x1004
++#define RTL838X_LED_P_EN_CTRL		0xa008
++#define RTL838X_LED_SW_CTRL		0xa00c
++#define RTL838X_LED0_SW_P_EN_CTRL	0xa010
++#define RTL838X_LED1_SW_P_EN_CTRL	0xa014
++#define RTL838X_LED_SW_P_CTRL(port)	(0xa01c + ((port) << 2))
++#define RTL838X_LED_PORTS		28
++#define RTL838X_LED_CHANNELS		2
++
++struct rtl8380_portled {
++	struct gpio_chip gc;
++};
++
++static int rtl8380_portled_set(struct gpio_chip *gc, unsigned int offset,
++				int value)
++{
++	unsigned int channel = offset / RTL838X_LED_PORTS;
++	unsigned int port = offset % RTL838X_LED_PORTS;
++	unsigned int shift = channel * 3;
++
++	if (channel >= RTL838X_LED_CHANNELS)
++		return -EINVAL;
++
++	/* LED mode 5 is steady on; mode 0 turns the selected channel off. */
++	sw_w32_mask(0x7 << shift, value ? 0x5 << shift : 0,
++		     RTL838X_LED_SW_P_CTRL(port));
++	return 0;
++}
++
++static int rtl8380_portled_direction_output(struct gpio_chip *gc,
++					    unsigned int offset, int value)
++{
++	return rtl8380_portled_set(gc, offset, value);
++}
++
++static int rtl8380_portled_get_direction(struct gpio_chip *gc,
++					 unsigned int offset)
++{
++	return GPIO_LINE_DIRECTION_OUT;
++}
++
++static int rtl8380_portled_get(struct gpio_chip *gc, unsigned int offset)
++{
++	unsigned int channel = offset / RTL838X_LED_PORTS;
++	unsigned int port = offset % RTL838X_LED_PORTS;
++	u32 v;
++
++	if (channel >= RTL838X_LED_CHANNELS)
++		return 0;
++	v = sw_r32(RTL838X_LED_SW_P_CTRL(port));
++	return ((v >> (channel * 3)) & 0x7) == 0x5;
++}
++
++static void rtl8380_portled_enable(struct device *dev)
++{
++	u32 port_enable_mask = GENMASK(RTL838X_LED_PORTS - 1, 0);
++
++	/*
++	 * Validated on RTL8380M_INTPHY_2FIB_1G_DEMO: software override uses
++	 * serial mode, two LED groups, and the per-port software registers.
++	 * Keep the remaining bits in LED_GLB_CTRL (notably SYS LED state)
++	 * unchanged.
++	 */
++	sw_w32_mask(0x3, 0, RTL838X_LED_MODE_SEL);
++	sw_w32_mask(0x3f, 0x3 | (0x3 << 3), RTL838X_LED_GLB_CTRL);
++	of_property_read_u32(dev->of_node, "realtek,port-enable-mask",
++			     &port_enable_mask);
++	sw_w32(port_enable_mask, RTL838X_LED_P_EN_CTRL);
++	sw_w32(GENMASK(RTL838X_LED_PORTS - 1, 0), RTL838X_LED_SW_CTRL);
++	sw_w32(GENMASK(RTL838X_LED_PORTS - 1, 0), RTL838X_LED0_SW_P_EN_CTRL);
++	sw_w32(GENMASK(RTL838X_LED_PORTS - 1, 0), RTL838X_LED1_SW_P_EN_CTRL);
++
++	for (unsigned int port = 0; port < RTL838X_LED_PORTS; port++)
++		sw_w32(0, RTL838X_LED_SW_P_CTRL(port));
++}
++
++static int rtl8380_portled_probe(struct platform_device *pdev)
++{
++	struct rtl8380_portled *leds;
++	u32 force_mask = 0;
++	unsigned int port;
++	int ret;
++
++	leds = devm_kzalloc(&pdev->dev, sizeof(*leds), GFP_KERNEL);
++	if (!leds)
++		return -ENOMEM;
++
++	rtl8380_portled_enable(&pdev->dev);
++
++	leds->gc.label = "rtl8380-port-leds";
++	leds->gc.parent = &pdev->dev;
++	leds->gc.owner = THIS_MODULE;
++	leds->gc.base = -1;
++	leds->gc.ngpio = RTL838X_LED_PORTS * RTL838X_LED_CHANNELS;
++	leds->gc.can_sleep = false;
++	leds->gc.set = rtl8380_portled_set;
++	leds->gc.get = rtl8380_portled_get;
++	leds->gc.direction_output = rtl8380_portled_direction_output;
++	leds->gc.get_direction = rtl8380_portled_get_direction;
++
++	ret = devm_gpiochip_add_data(&pdev->dev, &leds->gc, leds);
++	if (ret)
++		return ret;
++
++	/* Optional diagnostic mode: hold both LED channels on for each port. */
++	of_property_read_u32(pdev->dev.of_node, "realtek,force-on-port-mask",
++				     &force_mask);
++	for (port = 0; port < RTL838X_LED_PORTS; port++) {
++		if (force_mask & BIT(port)) {
++			rtl8380_portled_set(&leds->gc, port, 1);
++			rtl8380_portled_set(&leds->gc, RTL838X_LED_PORTS + port, 1);
++		}
++	}
++
++	dev_info(&pdev->dev, "RTL8380 port LED software control enabled\\n");
++	return 0;
++}
++
++static const struct of_device_id rtl8380_portled_of_match[] = {
++	{ .compatible = "realtek,rtl8380-port-leds" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rtl8380_portled_of_match);
++
++static struct platform_driver rtl8380_portled_driver = {
++	.probe = rtl8380_portled_probe,
++	.driver = {
++		.name = "rtl8380-port-leds",
++		.of_match_table = rtl8380_portled_of_match,
++	},
++};
++module_platform_driver(rtl8380_portled_driver);
++
++MODULE_DESCRIPTION("RTL8380 port LED software control GPIO provider");
++MODULE_LICENSE("GPL");

@@ -1,0 +1,64 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Intelbras SG 1002 MR L2+ front-panel port LED policy.
+
+set_led()
+{
+	echo "$2" > "/sys/class/leds/$1/brightness"
+}
+
+disable_trigger()
+{
+	echo none > "/sys/class/leds/$1/trigger"
+}
+
+[ -d /sys/class/leds/amber:lan-1 ] || exit 0
+
+for n in 1 2 3 4 5 6 7 8 9 10; do
+	disable_trigger "amber:lan-$n"
+	disable_trigger "green:lan-$n"
+	set_led "amber:lan-$n" 0
+	set_led "green:lan-$n" 0
+done
+
+while true; do
+	for n in 1 2 3 4 5 6 7 8 9 10; do
+		dev="lan$n"
+		amber="amber:lan-$n"
+		green="green:lan-$n"
+		state="/tmp/sg1002-port-led-$n"
+
+		[ -r "/sys/class/net/$dev/carrier" ] || continue
+		if [ "$(cat "/sys/class/net/$dev/carrier")" != 1 ]; then
+			set_led "$amber" 0
+			set_led "$green" 0
+			rm -f "$state"
+			continue
+		fi
+
+		speed=$(cat "/sys/class/net/$dev/speed" 2>/dev/null || echo 0)
+		if [ "$speed" -ge 1000 ] 2>/dev/null; then
+			active="$green"
+			inactive="$amber"
+		else
+			active="$amber"
+			inactive="$green"
+		fi
+
+		set_led "$inactive" 0
+		set_led "$active" 1
+
+		rx=$(cat "/sys/class/net/$dev/statistics/rx_bytes")
+		tx=$(cat "/sys/class/net/$dev/statistics/tx_bytes")
+		current="$rx:$tx"
+		previous=$(cat "$state" 2>/dev/null || true)
+		if [ -n "$previous" ] && [ "$current" != "$previous" ]; then
+			# A brief dark pulse on the selected colour signals RX or TX.
+			set_led "$active" 0
+			sleep 0.04
+			set_led "$active" 1
+		fi
+		echo "$current" > "$state"
+	done
+	sleep 0.2
+done

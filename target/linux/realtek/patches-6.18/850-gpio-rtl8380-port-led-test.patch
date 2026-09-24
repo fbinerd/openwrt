@@ -8,7 +8,7 @@ intentionally generic; the board DTS elects to claim the port LED engine.
 
 --- a/drivers/gpio/Kconfig
 +++ b/drivers/gpio/Kconfig
-@@ -567,6 +567,15 @@
+@@ -613,3 +613,12 @@
  	  When built as a module, the module will be called realtek_otto_gpio.
 +config GPIO_RTL8380_PORT_LED
 +	bool "Realtek RTL8380 port LED software control"
@@ -21,9 +21,6 @@ intentionally generic; the board DTS elects to claim the port LED engine.
 +
  config GPIO_REG
  	bool
- config GPIO_REALTEK_OTTO
- 	tristate "Realtek Otto GPIO support"
- 	depends on MACH_REALTEK_RTL
 --- a/drivers/gpio/Makefile
 +++ b/drivers/gpio/Makefile
 @@ -155,4 +155,5 @@

@@ -407,6 +407,41 @@ define Device/zyxel_gs1900-10hp-b1
 endef
 TARGET_DEVICES += zyxel_gs1900-10hp-b1
 
+# SG 1002 MR running the GPL boot chain (Stage-1 preloader, Stage-2 U-Boot).
+# It intentionally has no Intelbras BDCO/RAR flash recipe.  U-Boot boots the
+# firmware with `bootm 0xb4150000`.
+#
+# The flashed kernel is an LZMA uImage, decompressed by U-Boot itself (the GPL
+# U-Boot has CONFIG_LZMA since V212).  gzip was tried and boots, but the kernel
+# is 4.35 MB instead of 3.1 MB and the image no longer fits the firmware
+# partition (15728644 > 15204352).  The initramfs kernel keeps the rt-loader:
+# uncompressed it is 41 MB, more than this U-Boot's CONFIG_SYS_BOOTM_LEN
+# (32 MiB) lets bootm unpack.
+#
+# IMAGE_SIZE is the whole "firmware" partition of the DTS, 0x150000-0xfcffff
+# = 0xe80000 = 14848k: kernel and squashfs rootfs, the rest is the overlay.
+#
+# DEVICE_COMPAT_VERSION must match what board.d/05_compat-version sets on the
+# running system for this board (2.0); without it the image carries 1.0 and
+# sysupgrade refuses it ("image version (2.0->1.0)").  This device does not
+# inherit Device/zyxel_gs1900, which is where the other 2.0 boards get it.
+define Device/intelbras_sg1002-mr
+  $(Device/uimage-rt-loader)
+  KERNEL := kernel-bin | append-dtb | lzma | uImage lzma
+  DEVICE_COMPAT_VERSION := 2.0
+  DEVICE_COMPAT_MESSAGE := Kernel and rootfs now live in a single "firmware" \
+	partition at 0x150000 of the GPL U-Boot partition map. Reinstall through U-Boot \
+	(TFTP + sf) instead of keeping the configuration.
+  SOC := rtl8380
+  DEVICE_DTS := rtl8380_intelbras_sg1002-mr
+  DEVICE_VENDOR := Intelbras
+  DEVICE_MODEL := SG 1002 MR L2+
+  DEVICE_PACKAGES += gpiod-tools
+  IMAGE_SIZE := 14848k
+  SUPPORTED_DEVICES += intelbras,sg1002-mr
+endef
+TARGET_DEVICES += intelbras_sg1002-mr
+
 define Device/zyxel_gs1900-16-a1
   $(Device/zyxel_gs1900)
   SOC := rtl8382

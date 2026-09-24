@@ -52,6 +52,14 @@ realtek_setup_macs()
 	local label_mac=""
 
 	case $board in
+	intelbras,sg1002-mr)
+		# Preserve Intelbras' assigned OUI. DSA ports are BDCO base+1..+10.
+		lan_mac=$(get_mac_label)
+		eth0_mac=$lan_mac
+		for n in 1 2 3 4 5 6 7 8 9 10; do
+			ucidef_set_network_device_mac "lan${n}" "$(macaddr_add "$lan_mac" "$n")"
+		done
+		;;
 	datto,l8|\
 	edgecore,ecs4100-12ph|\
 	linksys,lgs310c|\

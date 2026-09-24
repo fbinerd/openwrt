@@ -1,0 +1,342 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+/*
+ * Intelbras SG 1002 MR L2+
+ *
+ * DTS for the RTL8380M_INTPHY_2FIB_1G_DEMO hardware profile, booted by the GPL
+ * U-Boot either as an initramfs loaded by TFTP or from the "firmware"
+ * partition.  It intentionally does not expose the vendor flash contents: the
+ * running system must not interpret or alter the Intelbras VxWorks layout.
+ *
+ * Confirmed topology: RTL8380M, 128 MiB DDR3, eight RTL8218B internal PHYs
+ * (MAC/PHY 8..15), 1G fibre SerDes 4 and 5 (MAC 24 and 26), CPU MAC 28.
+ * The board visibly has two RTL8231 expanders.  RTL8231 address 0 is the
+ * first candidate for the front-panel scan matrix.  The Realtek reference
+ * profile for this PCB family selects single-colour scanning: the two banks
+ * represent the two LEDs in each of the ten front-panel positions.  Address
+ * 1 is the expander of the two SFP cages: several tracks run from the SFP
+ * cages to the second RTL8231 (observed on the board by its owner, not yet
+ * verified electrically or with a module).  It remains GPIO-only until the
+ * individual pins are measured.
+ */
+#include "rtl838x.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	compatible = "intelbras,sg1002-mr", "realtek,rtl838x-soc";
+	model = "Intelbras SG 1002 MR L2+ (RTL8380M INTPHY 2FIB 1G)";
+
+	aliases {
+		/* BDCO base MAC at SPI offset 0x141038. */
+		label-mac-device = &ethernet0;
+
+		/* The measured active-low SYS LED is the OpenWrt diagnostic LED. */
+		led-boot = &sys;
+		led-failsafe = &sys;
+		led-running = &sys;
+		led-upgrade = &sys;
+	};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x8000000>;
+	};
+
+	port_leds: port-leds {
+		compatible = "realtek,rtl8380-port-leds";
+		gpio-controller;
+		#gpio-cells = <2>;
+		/* Measured from the vendor board's stable LED-engine state. */
+		realtek,port-enable-mask = <0x05ffffff>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		amber_lan1: amber-lan1 { label = "amber:lan-1"; gpios = <&port_leds 16 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		amber_lan2: amber-lan2 { label = "amber:lan-2"; gpios = <&port_leds 17 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		amber_lan3: amber-lan3 { label = "amber:lan-3"; gpios = <&port_leds 18 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		amber_lan4: amber-lan4 { label = "amber:lan-4"; gpios = <&port_leds 19 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		amber_lan5: amber-lan5 { label = "amber:lan-5"; gpios = <&port_leds 20 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		amber_lan6: amber-lan6 { label = "amber:lan-6"; gpios = <&port_leds 21 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		amber_lan7: amber-lan7 { label = "amber:lan-7"; gpios = <&port_leds 22 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		amber_lan8: amber-lan8 { label = "amber:lan-8"; gpios = <&port_leds 23 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		amber_lan9: amber-lan9 { label = "amber:lan-9"; gpios = <&port_leds 24 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		amber_lan10: amber-lan10 { label = "amber:lan-10"; gpios = <&port_leds 26 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+
+		green_lan1: green-lan1 { label = "green:lan-1"; gpios = <&port_leds 44 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		green_lan2: green-lan2 { label = "green:lan-2"; gpios = <&port_leds 45 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		green_lan3: green-lan3 { label = "green:lan-3"; gpios = <&port_leds 46 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		green_lan4: green-lan4 { label = "green:lan-4"; gpios = <&port_leds 47 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		green_lan5: green-lan5 { label = "green:lan-5"; gpios = <&port_leds 48 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		green_lan6: green-lan6 { label = "green:lan-6"; gpios = <&port_leds 49 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		green_lan7: green-lan7 { label = "green:lan-7"; gpios = <&port_leds 50 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		green_lan8: green-lan8 { label = "green:lan-8"; gpios = <&port_leds 51 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		green_lan9: green-lan9 { label = "green:lan-9"; gpios = <&port_leds 52 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+		green_lan10: green-lan10 { label = "green:lan-10"; gpios = <&port_leds 54 GPIO_ACTIVE_HIGH>; default-state = "off"; };
+
+		/* Measured: RTL8231 address 0, GPIO27, active-low. */
+		sys: sys {
+			label = "sys";
+			gpios = <&rtl8231_0 27 GPIO_ACTIVE_LOW>;
+			/* Preserve RUNNING through S96led's saved-state restoration. */
+			default-state = "on";
+		};
+	};
+
+};
+
+/* UART0 is physically connected and remains at the U-Boot rate. */
+&uart0 {
+	status = "okay";
+};
+
+/* No second UART or PoE controller is known on this non-PoE model. */
+&uart1 {
+	status = "disabled";
+};
+
+/*
+ * The only vendor area exposed to Linux is the immutable BDCO factory sector.
+ * The Intelbras bootrom/VxWorks image (0x050000) is not registered, so Linux
+ * never gets a writable MTD target for the proprietary layout.
+ *
+ * Two more partitions belong to the GPL boot chain, not to the Intelbras
+ * layout:
+ *
+ * "u-boot-env" is the environment of the GPL U-Boot (Stage-2), a single 64 KiB
+ * copy at 0x040000 (CONFIG_ENV_OFFSET/CONFIG_ENV_SIZE of
+ * configs/intelbras_sg1002_mr_factory_payload_defconfig, CRC32 in target
+ * byte order, no redundancy flag).  The name matters: uboot-envtools'
+ * 30_uboot-envtools looks the partition up by it to generate
+ * /etc/fw_env.config (its default case, env 0x10000 / sector 0x10000, fits
+ * this flash; the optional "u-boot-env2" it probes does not exist and is
+ * skipped).  That script only runs after preinit, while 05_fw_defaults calls
+ * fw_loadenv during preinit.  The compatible "u-boot,env" is what lets
+ * fw_printenv fall back to the NVMEM device the MTD core registers for the
+ * partition (/sys/bus/nvmem/devices/mtdN/nvmem, needs CONFIG_NVMEM_SYSFS)
+ * while /etc/fw_env.config does not exist yet.
+ *
+ * "firmware" is the OpenWrt image that U-Boot boots with `bootm 0xb4150000`
+ * (openwrt_addr in the U-Boot environment): a standard uImage kernel followed
+ * by the rootfs, split by the denx,uimage parser.  It spans 0x150000-0xfcffff,
+ * the old Intelbras filesystem area, which this project already replaced with
+ * OpenWrt; nothing below 0x150000 (bootrom at 0x050000, factory at 0x140000)
+ * and nothing above it is reachable through this partition.  It is what lets
+ * sysupgrade rewrite the image from OpenWrt itself.
+ */
+&spi0 {
+	status = "okay";
+
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <50000000>;
+		m25p,fast-read;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@40000 {
+				compatible = "u-boot,env";
+				label = "u-boot-env";
+				reg = <0x40000 0x10000>;
+			};
+
+			factory: partition@140000 {
+				label = "factory";
+				reg = <0x140000 0x10000>;
+				read-only;
+
+				nvmem-layout {
+					compatible = "fixed-layout";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					macaddr_factory: macaddr@1038 {
+						compatible = "mac-base";
+						reg = <0x1038 0x6>;
+						#nvmem-cell-cells = <1>;
+					};
+				};
+			};
+
+			partition@150000 {
+				label = "firmware";
+				compatible = "denx,uimage";
+				reg = <0x150000 0xe80000>;
+			};
+		};
+	};
+};
+
+/* Base MAC plus a deterministic increment for every front-panel port. */
+&ethernet0 {
+	nvmem-cells = <&macaddr_factory 0>;
+	nvmem-cell-names = "mac-address";
+};
+
+&mdio_aux {
+	status = "okay";
+
+	rtl8231_0: expander@0 {
+		compatible = "realtek,rtl8231";
+		reg = <0>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-ranges = <&rtl8231_0 0 0 37>;
+
+		/*
+		 * The RTL8380 LED engine already drives the two port colour channels
+		 * through &port_leds.  Do not put RTL8231 pins 0..19 into its own
+		 * scan mode: that is a second producer for the same front-panel LED
+		 * paths and produces group flicker/ghost illumination.  GPIO27 remains
+		 * available as the separate SYS LED.
+		 *
+		 * Measured on the board (read-only scan of the aux MDIO bus, address 0,
+		 * after the driver's init): PIN_MODE0/1 = 0xffff and PIN_HI_CFG mode
+		 * bits = 0x1f, i.e. all 37 pins are in GPIO mode and none in LED mode;
+		 * GPIO_DIR1 = 0xf7ff, i.e. GPIO27 is the only output.  The LED scan
+		 * matrix of this expander is therefore unused, which is what the
+		 * disabled node below says; without it the MFD core warns "Failed to
+		 * locate of_node" and the LED driver then fails with "scan mode
+		 * missing or invalid".
+		 */
+		led-controller {
+			compatible = "realtek,rtl8231-leds";
+			status = "disabled";
+		};
+	};
+
+	/*
+	 * Second RTL8231: the SFP sideband expander.  Several tracks from the two
+	 * SFP cages (presumably TX_DISABLE, LOS, MOD_DEF0 and similar) go to this
+	 * chip; no SFP module was available to confirm which pin is which, so
+	 * that is not described yet and the pins stay plain GPIOs.
+	 *
+	 * It has never answered on the auxiliary MDIO bus: of the addresses 0..31
+	 * only address 0 (the first RTL8231) reads back anything, so at boot this
+	 * node logs "RTL8231 not present or ready 0x3f != 0x37".  reg = <1> is
+	 * therefore only a placeholder for a strapped address that is not known
+	 * (RTL8231 pins 37..41).  The node is kept, and the message with it,
+	 * because the chip is real and the failure is a real hardware finding;
+	 * see the V214/V216 notes of the U-Boot bring-up document for the
+	 * hypotheses (held in reset, SMI-slave or shift-register strapping, other
+	 * MDC/MDIO pins) and the measurements that would settle it.
+	 */
+	rtl8231_1: expander@1 {
+		compatible = "realtek,rtl8231";
+		reg = <1>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-ranges = <&rtl8231_1 0 0 37>;
+	};
+};
+
+&mdio_bus0 {
+	PHY_C22(8, 8)
+	PHY_C22(9, 9)
+	PHY_C22(10, 10)
+	PHY_C22(11, 11)
+	PHY_C22(12, 12)
+	PHY_C22(13, 13)
+	PHY_C22(14, 14)
+	PHY_C22(15, 15)
+};
+
+&switch0 {
+	ethernet-ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		SWITCH_PORT(8, 1, internal)
+		SWITCH_PORT(9, 2, internal)
+		SWITCH_PORT(10, 3, internal)
+		SWITCH_PORT(11, 4, internal)
+		SWITCH_PORT(12, 5, internal)
+		SWITCH_PORT(13, 6, internal)
+		SWITCH_PORT(14, 7, internal)
+		SWITCH_PORT(15, 8, internal)
+
+		/*
+		 * The SFP cage I2C and MOD_DEF0/LOS GPIO wiring is still to be
+		 * measured (the GPIOs are expected on the second RTL8231,
+		 * &rtl8231_1, which does not answer yet).  Do not use fixed-link here: it fabricates carrier even
+		 * with an empty cage.  Let the PCS report its in-band link state
+		 * until the full sff,sfp description can be added.
+		 */
+		port@24 {
+			reg = <24>;
+			label = "lan9";
+			pcs-handle = <&serdes4 0>;
+			phy-mode = "1000base-x";
+			managed = "in-band-status";
+			nvmem-cells = <&macaddr_factory 9>;
+			nvmem-cell-names = "mac-address";
+		};
+
+		port@26 {
+			reg = <26>;
+			label = "lan10";
+			pcs-handle = <&serdes5 0>;
+			phy-mode = "1000base-x";
+			managed = "in-band-status";
+			nvmem-cells = <&macaddr_factory 10>;
+			nvmem-cell-names = "mac-address";
+		};
+
+		port@28 {
+			ethernet = <&ethernet0>;
+			reg = <28>;
+			phy-mode = "internal";
+			fixed-link {
+				speed = <1000>;
+				full-duplex;
+			};
+		};
+	};
+};
+
+&port8 {
+	nvmem-cells = <&macaddr_factory 1>;
+	nvmem-cell-names = "mac-address";
+};
+
+&port9 {
+	nvmem-cells = <&macaddr_factory 2>;
+	nvmem-cell-names = "mac-address";
+};
+
+&port10 {
+	nvmem-cells = <&macaddr_factory 3>;
+	nvmem-cell-names = "mac-address";
+};
+
+&port11 {
+	nvmem-cells = <&macaddr_factory 4>;
+	nvmem-cell-names = "mac-address";
+};
+
+&port12 {
+	nvmem-cells = <&macaddr_factory 5>;
+	nvmem-cell-names = "mac-address";
+};
+
+&port13 {
+	nvmem-cells = <&macaddr_factory 6>;
+	nvmem-cell-names = "mac-address";
+};
+
+&port14 {
+	nvmem-cells = <&macaddr_factory 7>;
+	nvmem-cell-names = "mac-address";
+};
+
+&port15 {
+	nvmem-cells = <&macaddr_factory 8>;
+	nvmem-cell-names = "mac-address";
+};

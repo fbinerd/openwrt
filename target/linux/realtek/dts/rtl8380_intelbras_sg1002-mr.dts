@@ -5,8 +5,9 @@
  *
  * DTS for the RTL8380M_INTPHY_2FIB_1G_DEMO hardware profile, booted by the GPL
  * U-Boot either as an initramfs loaded by TFTP or from the "firmware"
- * partition.  It intentionally does not expose the vendor flash contents: the
- * running system must not interpret or alter the Intelbras VxWorks layout.
+ * partition.  The whole 16 MiB flash is described, but everything except the
+ * U-Boot environment and the "firmware" partition is read-only: the running
+ * system must not alter the boot chain or the Intelbras VxWorks layout.
  *
  * Confirmed topology: RTL8380M, 128 MiB DDR3, eight RTL8218B internal PHYs
  * (MAC/PHY 8..15), 1G fibre SerDes 4 and 5 (MAC 24 and 26), CPU MAC 28.
@@ -99,12 +100,35 @@
 };
 
 /*
- * The only vendor area exposed to Linux is the immutable BDCO factory sector.
- * The Intelbras bootrom/VxWorks image (0x050000) is not registered, so Linux
- * never gets a writable MTD target for the proprietary layout.
+ * Flash map.  Every partition starts and ends on a 64 KiB erase block (the
+ * size the MTD core uses on this W25Q128), which is also why 0x000000-0x03ffff
+ * is one partition: an entry at 0x008000 would not be block aligned and the
+ * core would print a warning and force it read-only anyway.
  *
- * Two more partitions belong to the GPL boot chain, not to the Intelbras
- * layout:
+ *   0x000000 0x040000  u-boot      GPL boot chain            read-only
+ *   0x040000 0x010000  u-boot-env  GPL U-Boot environment    writable
+ *   0x050000 0x0f0000  bootrom     Intelbras VxWorks bootrom read-only
+ *   0x140000 0x010000  factory     BDCO factory sector       read-only
+ *   0x150000 0xe80000  firmware    OpenWrt image             writable
+ *   0xfd0000 0x030000  reserved    unused                    read-only
+ *
+ * Only "u-boot-env" and "firmware" can be written from Linux.  Nothing else
+ * is reachable through a writable MTD target, so a stray mtd write or a
+ * sysupgrade cannot touch the boot chain or the proprietary layout.
+ *
+ * "u-boot" holds the GPL Stage-1 preloader (0x000000-0x007fff: DDR training,
+ * copies Stage-2 to RAM) and the GPL Stage-2 U-Boot (0x008000-0x03ffff).  A
+ * bad write here bricks the board; recovery needs an external programmer.
+ *
+ * "bootrom" is the Intelbras VxWorks bootrom, a uImage named "bootrom"
+ * (0x050000-0x0f2e93, gzip payload vxWorks.bin) followed by padding up to the
+ * factory sector.  The GPL U-Boot can still boot it as its fallback target
+ * (vxworks_addr).  Stage-1 also reads its DDR training pattern from 0x050000
+ * (static observation of the code, not verified on the board), so erasing this
+ * area would change the calibration data.
+ *
+ * "reserved" (0xfd0000-0xffffff) is erased (0xff) in the factory dump and has
+ * no identified use.
  *
  * "u-boot-env" is the environment of the GPL U-Boot (Stage-2), a single 64 KiB
  * copy at 0x040000 (CONFIG_ENV_OFFSET/CONFIG_ENV_SIZE of
@@ -141,10 +165,22 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
+			partition@0 {
+				label = "u-boot";
+				reg = <0x0 0x40000>;
+				read-only;
+			};
+
 			partition@40000 {
 				compatible = "u-boot,env";
 				label = "u-boot-env";
 				reg = <0x40000 0x10000>;
+			};
+
+			partition@50000 {
+				label = "bootrom";
+				reg = <0x50000 0xf0000>;
+				read-only;
 			};
 
 			factory: partition@140000 {
@@ -169,6 +205,12 @@
 				label = "firmware";
 				compatible = "denx,uimage";
 				reg = <0x150000 0xe80000>;
+			};
+
+			partition@fd0000 {
+				label = "reserved";
+				reg = <0xfd0000 0x30000>;
+				read-only;
 			};
 		};
 	};

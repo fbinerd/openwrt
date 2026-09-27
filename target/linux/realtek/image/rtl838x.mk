@@ -413,13 +413,17 @@ TARGET_DEVICES += zyxel_gs1900-10hp-b1
 #
 # The flashed kernel is an LZMA uImage, decompressed by U-Boot itself (the GPL
 # U-Boot has CONFIG_LZMA since V212).  gzip was tried and boots, but the kernel
-# is 4.35 MB instead of 3.1 MB and the image no longer fits the firmware
-# partition (15728644 > 15204352).  The initramfs kernel keeps the rt-loader:
+# is 4.35 MB instead of 3.1 MB and the image still does not fit the firmware
+# partition (15728644 > 15400960, even with the extra 192k folded in below).
+# The initramfs kernel keeps the rt-loader:
 # uncompressed it is 41 MB, more than this U-Boot's CONFIG_SYS_BOOTM_LEN
 # (32 MiB) lets bootm unpack.
 #
-# IMAGE_SIZE is the whole "firmware" partition of the DTS, 0x150000-0xfcffff
-# = 0xe80000 = 14848k: kernel and squashfs rootfs, the rest is the overlay.
+# IMAGE_SIZE is the whole "firmware" partition of the DTS, 0x150000-0xffffff
+# = 0xeb0000 = 15040k: kernel and squashfs rootfs, the rest is the overlay.
+# The vendor's own map ended this partition at 0xfcffff (14848k) and left the
+# last 192k as a separate, always-erased "reserved" partition (verified empty
+# against a full-chip factory dump); it is folded in here too.
 #
 # DEVICE_COMPAT_VERSION must match what board.d/05_compat-version sets on the
 # running system for this board (2.0); without it the image carries 1.0 and
@@ -437,7 +441,7 @@ define Device/intelbras_sg1002-mr
   DEVICE_VENDOR := Intelbras
   DEVICE_MODEL := SG 1002 MR L2+
   DEVICE_PACKAGES += gpiod-tools
-  IMAGE_SIZE := 14848k
+  IMAGE_SIZE := 15040k
   SUPPORTED_DEVICES += intelbras,sg1002-mr
 endef
 TARGET_DEVICES += intelbras_sg1002-mr

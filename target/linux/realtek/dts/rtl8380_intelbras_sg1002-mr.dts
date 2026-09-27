@@ -107,10 +107,10 @@
  *
  *   0x000000 0x040000  u-boot      GPL boot chain            read-only
  *   0x040000 0x010000  u-boot-env  GPL U-Boot environment    writable
+ *									https://github.com/fbinerd/u-boot/tree/v2026.07-sg1002-mr
  *   0x050000 0x0f0000  bootrom     Intelbras VxWorks bootrom read-only
  *   0x140000 0x010000  factory     BDCO factory sector       read-only
- *   0x150000 0xe80000  firmware    OpenWrt image             writable
- *   0xfd0000 0x030000  reserved    unused                    read-only
+ *   0x150000 0xeb0000  firmware    OpenWrt image             writable
  *
  * Only "u-boot-env" and "firmware" can be written from Linux.  Nothing else
  * is reachable through a writable MTD target, so a stray mtd write or a
@@ -127,9 +127,6 @@
  * (static observation of the code, not verified on the board), so erasing this
  * area would change the calibration data.
  *
- * "reserved" (0xfd0000-0xffffff) is erased (0xff) in the factory dump and has
- * no identified use.
- *
  * "u-boot-env" is the environment of the GPL U-Boot (Stage-2), a single 64 KiB
  * copy at 0x040000 (CONFIG_ENV_OFFSET/CONFIG_ENV_SIZE of
  * configs/intelbras_sg1002_mr_factory_payload_defconfig, CRC32 in target
@@ -145,11 +142,20 @@
  *
  * "firmware" is the OpenWrt image that U-Boot boots with `bootm 0xb4150000`
  * (openwrt_addr in the U-Boot environment): a standard uImage kernel followed
- * by the rootfs, split by the denx,uimage parser.  It spans 0x150000-0xfcffff,
- * the old Intelbras filesystem area, which this project already replaced with
- * OpenWrt; nothing below 0x150000 (bootrom at 0x050000, factory at 0x140000)
- * and nothing above it is reachable through this partition.  It is what lets
- * sysupgrade rewrite the image from OpenWrt itself.
+ * by the rootfs, split by the denx,uimage parser.  It spans 0x150000-0xffffff,
+ * the old Intelbras filesystem area plus the vendor's own trailing "reserved"
+ * sector, which this project already replaced with OpenWrt; nothing below
+ * 0x150000 (bootrom at 0x050000, factory at 0x140000) is reachable through
+ * this partition.  It is what lets sysupgrade rewrite the image from OpenWrt
+ * itself.
+ *
+ * The vendor's own map ended "firmware" at 0xfcffff and left 0xfd0000-0xffffff
+ * as a separate "reserved" partition; a full-chip factory dump (both an
+ * external CH341A read and a second, independent read, byte for byte
+ * identical) has every one of those 192 KiB erased (0xff), with no header, ID,
+ * or string of any kind. There is nothing to preserve there, so it is folded
+ * into "firmware" instead of kept as a dead partition, giving OpenWrt the
+ * extra headroom instead of leaving it unusable.
  */
 &spi0 {
 	status = "okay";
@@ -204,13 +210,7 @@
 			partition@150000 {
 				label = "firmware";
 				compatible = "denx,uimage";
-				reg = <0x150000 0xe80000>;
-			};
-
-			partition@fd0000 {
-				label = "reserved";
-				reg = <0xfd0000 0x30000>;
-				read-only;
+				reg = <0x150000 0xeb0000>;
 			};
 		};
 	};
